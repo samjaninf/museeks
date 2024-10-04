@@ -1,8 +1,6 @@
 import type { Playlist } from '../generated/typings';
 import database from '../lib/database';
-import { invalidate } from '../lib/query';
 import { logAndNotifyError } from '../lib/utils';
-import router from '../views/router';
 
 import usePlayerStore from './usePlayerStore';
 import useToastsStore from './useToastsStore';
@@ -10,7 +8,7 @@ import useToastsStore from './useToastsStore';
 /**
  * Start playing playlist (on double click)
  */
-const play = async (playlistID: string): Promise<void> => {
+async function play(playlistID: string): Promise<void> {
   try {
     const playlist = await database.getPlaylist(playlistID);
     const tracks = await database.getTracks(playlist.tracks);
@@ -18,63 +16,63 @@ const play = async (playlistID: string): Promise<void> => {
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+}
 
 /**
  * Create a new playlist
  */
-const create = async (
+async function create(
   name: string,
   trackIDs: string[] = [],
-  redirect = false,
-) => {
+  silent = false,
+): Promise<Playlist | null> {
   try {
     const playlist = await database.createPlaylist(name, trackIDs);
-    invalidate();
 
-    if (redirect) router.navigate(`/playlists/${playlist._id}`);
-    else
+    if (!silent) {
       useToastsStore
         .getState()
         .api.add('success', `The playlist "${name}" was created`);
+    }
+
+    return playlist;
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+
+  return null;
+}
 
 /**
  * Rename a playlist
  */
-const rename = async (playlistID: string, name: string): Promise<void> => {
+async function rename(playlistID: string, name: string): Promise<void> {
   try {
     await database.renamePlaylist(playlistID, name);
-    invalidate();
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+}
 
 /**
  * Delete a playlist
  */
-const remove = async (playlistID: string): Promise<void> => {
+async function remove(playlistID: string): Promise<void> {
   try {
     await database.deletePlaylist(playlistID);
-    // FIX these when there is no more playlists
-    invalidate();
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+}
 
 /**
  * Add tracks to a playlist
  */
-const addTracks = async (
+async function addTracks(
   playlistID: string,
   tracksIDs: string[],
   isShown?: boolean,
-): Promise<void> => {
+): Promise<void> {
   // isShown should never be true, letting it here anyway to remember of a design issue
   if (isShown) return;
 
@@ -84,7 +82,6 @@ const addTracks = async (
     const playlist = await database.getPlaylist(playlistID);
     const playlistTracks = playlist.tracks.concat(tracksIDs);
     await database.setPlaylistTracks(playlistID, playlistTracks);
-    invalidate();
     toastsAPI.add(
       'success',
       `${tracksIDs.length} tracks were successfully added to "${playlist.name}"`,
@@ -92,51 +89,49 @@ const addTracks = async (
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+}
 
 /**
  * Remove tracks from a playlist
  */
-const removeTracks = async (
+async function removeTracks(
   playlistID: string,
   tracksIDs: string[],
-): Promise<void> => {
+): Promise<void> {
   try {
     const playlist = await database.getPlaylist(playlistID);
     const playlistTracks = playlist.tracks.filter(
       (elem: string) => !tracksIDs.includes(elem),
     );
     await database.setPlaylistTracks(playlistID, playlistTracks);
-    invalidate();
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+}
 
 /**
  * Duplicate a playlist
  */
-const duplicate = async (playlistID: string): Promise<void> => {
+async function duplicate(playlistID: string): Promise<void> {
   try {
     const playlist = await database.getPlaylist(playlistID);
     await database.createPlaylist(`Copy of ${playlist.name}`, playlist.tracks);
-    invalidate();
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+}
 
 /**
  * Reorder tracks in a playlists
  * TODO: currently only supports one track at a time, at a point you should be
  * able to re-order a selection of tracks
  */
-const reorderTracks = async (
+async function reorderTracks(
   playlistID: string,
   tracksIDs: string[],
   targetTrackID: string,
   position: 'above' | 'below',
-): Promise<void> => {
+): Promise<void> {
   if (tracksIDs.includes(targetTrackID)) return;
 
   try {
@@ -162,11 +157,10 @@ const reorderTracks = async (
 
     // Save and reload the playlist
     await database.setPlaylistTracks(playlistID, newTracks);
-    invalidate();
   } catch (err) {
     logAndNotifyError(err);
   }
-};
+}
 
 // Should we use something else to harmonize between zustand and non-store APIs?
 const PlaylistsAPI = {

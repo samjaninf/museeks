@@ -1,14 +1,14 @@
 import orderBy from 'lodash/orderBy';
+import uniq from 'lodash/uniq';
 
-import type { SortOrder, Track } from '../generated/typings';
-
+import type { SortBy, SortOrder, Track } from '../generated/typings';
 import { parseDuration } from '../hooks/useFormattedDuration';
-import type { SortConfig } from './sort-orders';
+import type { Path } from '../types/museeks';
 
 /**
  * Filter an array of tracks by string
  */
-export const filterTracks = (tracks: Track[], search: string): Track[] => {
+export function filterTracks(tracks: Track[], search: string): Track[] {
   // Avoid performing useless searches
   if (search.length === 0) return tracks;
 
@@ -20,47 +20,103 @@ export const filterTracks = (tracks: Track[], search: string): Track[] => {
       stripAccents(track.genres.toString().toLowerCase()).includes(search) ||
       stripAccents(track.title.toLowerCase()).includes(search),
   );
-};
+}
 
 /**
  * Sort an array of tracks (alias to lodash.orderby)
  */
-export const sortTracks = (
+export function sortTracks(
   tracks: Track[],
   sortBy: SortConfig,
   sortOrder: SortOrder,
-): Track[] => {
+): Track[] {
   // The first column is sorted either asc or desc, but the rest is always asc
   const firstOrder = sortOrder === 'Asc' ? 'asc' : 'desc';
   return orderBy<Track>(tracks, sortBy, [firstOrder]);
-};
+}
 
 /**
  * Format a list of tracks to a nice status
  */
-export const getStatus = (tracks: Track[]): string => {
+export function getStatus(tracks: Track[]): string {
   const status = parseDuration(
     tracks.map((d) => d.duration).reduce((a, b) => a + b, 0),
   );
   return `${tracks.length} track${tracks.length !== 1 ? 's' : ''}, ${status}`;
-};
+}
 
 /**
  * Strip accent from a string and lowercase them. From https://jsperf.com/strip-accents
- * Eventually, replace this by node-diacriticatics or something, but should be good enough for now
+ * Intentionally not idiomatic, it needs to be *fast*.
  */
-export const stripAccents = (str: string): string => {
-  const split = ACCENTS.split('').join('|');
-  const reg = new RegExp(`(${split})`, 'g');
+export function stripAccents(str: string): string {
+  let newStr = '';
 
-  function replacement(a: string) {
-    return ACCENT_REPLACEMENTS[ACCENTS.indexOf(a)] || '';
+  for (let i = 0; i < str.length; i++) {
+    if (ACCENT_MAP.has(str[i])) {
+      newStr += ACCENT_MAP.get(str[i]);
+    } else {
+      newStr += str[i];
+    }
   }
 
-  return str.replace(reg, replacement).toLowerCase();
-};
+  return newStr.toLowerCase();
+}
 
 const ACCENTS =
   'ÀÁÂÃÄÅĄĀàáâãäåąāÒÓÔÕÕÖØòóôõöøÈÉÊËĘĒèéêëðęēÇĆČçćčÐÌÍÎÏĪìíîïīÙÚÛÜŪùúûüūÑŅñņŠŚšśŸÿýŽŹŻžźżŁĻłļŃŅńņàáãảạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđùúủũụưừứửữựòóỏõọôồốổỗộơờớởỡợìíỉĩịäëïîüûñçýỳỹỵỷğışĞİŞĢģĶķ';
+
 const ACCENT_REPLACEMENTS =
   'AAAAAAAAaaaaaaaaOOOOOOOooooooEEEEEEeeeeeeeCCCcccDIIIIIiiiiiUUUUUuuuuuNNnnSSssYyyZZZzzzLLllNNnnaaaaaaaaaaaaaaaaaeeeeeeeeeeeduuuuuuuuuuuoooooooooooooooooiiiiiaeiiuuncyyyyygisGISGgKk';
+
+const ACCENT_MAP = new Map();
+
+for (let i = 0; i < ACCENTS.length; i++) {
+  ACCENT_MAP.set(ACCENTS[i], ACCENT_REPLACEMENTS[i]);
+}
+
+/**
+ * Given multiple paths as string, remove duplicates or child paths in case on parent exist in the array
+ */
+export const removeRedundantFolders = (paths: Array<string>): Array<string> => {
+  return uniq(
+    paths.filter((path) => {
+      const isDuplicate = paths.some((otherPath) => {
+        return path.startsWith(otherPath) && path !== otherPath;
+      });
+
+      return !isDuplicate;
+    }),
+  );
+};
+
+/** ----------------------------------------------------------------------------
+ * Sort utilities
+ * -------------------------------------------------------------------------- */
+
+// For perforances reasons, otherwise _.orderBy will perform weird checks
+// that are far more resource/time impactful
+const ARTIST = (t: Track): string =>
+  stripAccents(t.artists.toString().toLowerCase());
+const GENRE = (t: Track): string =>
+  stripAccents(t.genres.toString().toLowerCase());
+const ALBUM = (t: Track): string => stripAccents(t.album.toLowerCase());
+const TITLE = (t: Track): string => stripAccents(t.title.toLowerCase());
+
+type TrackKeys = Path<Track>;
+type IterateeFunction = (track: Track) => string;
+
+export type SortConfig = Array<TrackKeys | IterateeFunction>;
+
+// Declarations
+const SORT_ORDERS: Record<SortBy, SortConfig> = {
+  Artist: [ARTIST, 'year', ALBUM, 'disk.no', 'track.no'],
+  Title: [TITLE, ARTIST, 'year', ALBUM, 'disk.no', 'track.no'],
+  Duration: ['duration', ARTIST, 'year', ALBUM, 'disk.no', 'track.no'],
+  Album: [ALBUM, ARTIST, 'year', 'disk.no', 'track.no'],
+  Genre: [GENRE, ARTIST, 'year', ALBUM, 'disk.no', 'track.no'],
+};
+
+export function getSortOrder(sortBy: SortBy): SortConfig {
+  return SORT_ORDERS[sortBy];
+}

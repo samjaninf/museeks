@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { Playlist, Track } from '../generated/typings';
+import type { Playlist, ScanResult, Track } from '../generated/typings';
 
 /**
  * Bridge for the UI to communicate with the backend and manipulate the Database
@@ -20,9 +20,10 @@ const database = {
     });
   },
 
-  // TODO:
-  async updateTrack(_track: Track) {
-    throw new Error('Not implemented');
+  async updateTrack(track: Track): Promise<Track> {
+    return invoke('plugin:database|update_track', {
+      track,
+    });
   },
 
   async removeTracks(trackIDs: Array<string>): Promise<Array<Track>> {
@@ -31,7 +32,7 @@ const database = {
     });
   },
 
-  async importTracks(importPaths: Array<string>): Promise<void> {
+  async importTracks(importPaths: Array<string>): Promise<ScanResult> {
     return invoke('plugin:database|import_tracks_to_library', {
       importPaths,
     });
@@ -51,10 +52,10 @@ const database = {
     });
   },
 
-  async createPlaylist(name: string, tracks: Array<string>): Promise<Playlist> {
+  async createPlaylist(name: string, ids: Array<string>): Promise<Playlist> {
     return invoke('plugin:database|create_playlist', {
       name,
-      tracks,
+      ids,
     });
   },
 

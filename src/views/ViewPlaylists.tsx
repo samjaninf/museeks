@@ -6,21 +6,24 @@ import {
   useLoaderData,
 } from 'react-router-dom';
 
-import PlaylistsNav from '../components/PlaylistsNav/PlaylistsNav';
+import SideNav from '../components/SideNav/SideNav';
 import * as ViewMessage from '../elements/ViewMessage/ViewMessage';
 import database from '../lib/database';
 import PlaylistsAPI from '../stores/PlaylistsAPI';
 
+import useInvalidate from '../hooks/useInvalidate';
+import type { LoaderData } from '../types/museeks';
 import appStyles from './Root.module.css';
 import styles from './ViewPlaylists.module.css';
-import type { LoaderData } from './router';
 
 export default function ViewPlaylists() {
   const { playlists } = useLoaderData() as PlaylistsLoaderData;
+  const invalidate = useInvalidate();
 
   const createPlaylist = useCallback(async () => {
     await PlaylistsAPI.create('New playlist', [], false);
-  }, []);
+    invalidate();
+  }, [invalidate]);
 
   let playlistContent;
 
@@ -46,7 +49,7 @@ export default function ViewPlaylists() {
 
   return (
     <div className={`${appStyles.view} ${styles.viewPlaylists}`}>
-      <PlaylistsNav playlists={playlists} />
+      <SideNav title="Playlists" playlists={playlists} />
       <div className={styles.playlist}>{playlistContent}</div>
     </div>
   );

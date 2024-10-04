@@ -1,76 +1,99 @@
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { info } from '@tauri-apps/plugin-log';
 import * as semver from 'semver';
 
 import type { Config, DefaultView } from '../generated/typings';
 import config from '../lib/config';
-import { themes } from '../lib/themes';
+import { getTheme } from '../lib/themes';
 import { logAndNotifyError } from '../lib/utils';
-import type { Theme } from '../types/museeks';
 
-import router from '../views/router';
+import useLibraryStore from './useLibraryStore';
 import useToastsStore from './useToastsStore';
 
-interface UpdateCheckOptions {
-  silentFail?: boolean;
+// Manual prevention of a useEffect being called twice (to avoid refreshing the
+// library twice on startup in dev mode).
+// Also, we useInvalidate, SettingsAPI.init would infinitely loop. It means
+// something is fishy and need to be fixed "somewhere".
+let did_init = false;
+
+/**
+ * Init all settings, then show the app
+ */
+async function init(then: () => void): Promise<void> {
+  if (did_init) return;
+
+  did_init = true;
+  // Blocking (the window should not be shown until it's done)
+  await Promise.allSettled([
+    checkTheme(),
+    checkForUpdate({ silentFail: true }),
+  ]);
+
+  // Show the app once everything is loaded
+  await getCurrentWindow().show();
+  info('UI is ready!');
+
+  // Non-blocking, this can we done later
+  await checkForLibraryRefresh().catch(logAndNotifyError);
+  then();
 }
 
 const setTheme = async (themeID: string): Promise<void> => {
-  await config.set('theme', themeID); // TODO: own plugin?
-  await checkTheme();
+  await config.set('theme', themeID);
+
+  switch (themeID) {
+    case '__system': {
+      await getCurrentWindow().setTheme(null);
+      break;
+    }
+    case 'light': {
+      await getCurrentWindow().setTheme('light');
+      break;
+    }
+    case 'dark': {
+      await getCurrentWindow().setTheme('dark');
+      break;
+    }
+  }
+
+  const theme = (await getCurrentWindow().theme()) ?? 'light';
+
+  await applyThemeToUI(theme);
 };
 
 /**
  * Apply theme colors to  the BrowserWindow
  */
-const applyThemeToUI = async (theme: Theme): Promise<void> => {
+async function applyThemeToUI(themeID: string): Promise<void> {
+  const theme = getTheme(themeID);
+
   // TODO think about variables validity?
   // TODO: update the window theme dynamically
-
   const root = document.documentElement;
   Object.entries(theme.variables).forEach(([property, value]) => {
     root.style.setProperty(property, value);
   });
-};
+}
 
-const checkTheme = async (): Promise<void> => {
-  // TODO: Tauri offers no API to query the system system preference,getCurrent().theme()
-  // that is used when a window is created with no assigned theme.
-  // So we are bypassing the user choice for now.
-  // const themeID: string = await config.get("theme");
-  const themeID = (await getCurrentWindow().theme()) ?? 'light';
-  const theme = themes[themeID];
-
-  if (theme == null) {
-    throw new Error(`Theme ${themeID} not found`);
-  }
-
+async function checkTheme(): Promise<void> {
+  const theme = (await getCurrentWindow().theme()) ?? 'light';
   applyThemeToUI(theme);
-};
+}
 
-const setTracksDensity = async (
+async function setTracksDensity(
   density: Config['track_view_density'],
-): Promise<void> => {
+): Promise<void> {
   await config.set('track_view_density', density);
-  router.revalidate();
-};
-
-/**
- * Check and enable sleep blocker if needed
- */
-const checkSleepBlocker = async (): Promise<void> => {
-  if (await config.get('sleepblocker')) {
-    invoke('plugin:sleepblocker|enable');
-  }
-};
+}
 
 /**
  * Check if a new release is available
  */
-const checkForUpdate = async (
-  options: UpdateCheckOptions = {},
-): Promise<void> => {
+async function checkForUpdate(
+  options: { silentFail?: boolean } = {},
+): Promise<void> {
   const shouldCheck = await config.get('auto_update_checker');
 
   if (!shouldCheck) {
@@ -121,68 +144,67 @@ const checkForUpdate = async (
       options.silentFail,
     );
   }
-};
-
-/**
- * Init all settings
- */
-const check = async (): Promise<void> => {
-  await Promise.allSettled([
-    checkTheme(),
-    checkSleepBlocker(),
-    checkForUpdate({ silentFail: true }),
-  ]);
-};
+}
 
 /**
  * Toggle sleep blocker
  */
-const toggleSleepBlocker = async (value: boolean): Promise<void> => {
+async function toggleSleepBlocker(value: boolean): Promise<void> {
   if (value === true) {
     await invoke('plugin:sleepblocker|enable');
   } else {
     await invoke('plugin:sleepblocker|disable');
   }
-  router.revalidate();
-};
+}
 
 /**
  * Set the default view of the app
  */
-const setDefaultView = async (defaultView: DefaultView): Promise<void> => {
+async function setDefaultView(defaultView: DefaultView): Promise<void> {
   await invoke('plugin:default-view|set', {
     defaultView,
   });
-  router.revalidate();
-};
+}
+
+/**
+ * Toggle library refresh on startup
+ */
+async function toggleLibraryAutorefresh(value: boolean): Promise<void> {
+  await config.set('library_autorefresh', value);
+}
+
+async function checkForLibraryRefresh(): Promise<void> {
+  const autorefreshEnabled = config.getInitial('library_autorefresh');
+
+  if (autorefreshEnabled) {
+    useLibraryStore.getState().api.refresh();
+  }
+}
 
 /**
  * Toggle update check on startup
  */
-const toggleAutoUpdateChecker = async (value: boolean): Promise<void> => {
+async function toggleAutoUpdateChecker(value: boolean): Promise<void> {
   await config.set('auto_update_checker', value);
-  router.revalidate();
-};
+}
 
 /**
  * Toggle native notifications display
  */
-const toggleDisplayNotifications = async (value: boolean): Promise<void> => {
+async function toggleDisplayNotifications(value: boolean): Promise<void> {
   await config.set('notifications', value);
-  router.revalidate();
-};
+}
 
 // Should we use something else to harmonize between zustand and non-store APIs?
 const SettingsAPI = {
+  init,
   setTheme,
   applyThemeToUI,
   setTracksDensity,
-  check,
-  checkTheme,
-  checkSleepBlocker,
   checkForUpdate,
   toggleSleepBlocker,
   setDefaultView,
+  toggleLibraryAutorefresh,
   toggleAutoUpdateChecker,
   toggleDisplayNotifications,
 };

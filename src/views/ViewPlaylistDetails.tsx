@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import {
   Link,
   type LoaderFunctionArgs,
@@ -12,11 +12,12 @@ import * as ViewMessage from '../elements/ViewMessage/ViewMessage';
 import usePlayingTrackID from '../hooks/usePlayingTrackID';
 import config from '../lib/config';
 import database from '../lib/database';
-import { filterTracks } from '../lib/utils-library';
 import PlaylistsAPI from '../stores/PlaylistsAPI';
 import useLibraryStore from '../stores/useLibraryStore';
 
-import type { LoaderData } from './router';
+import useFilteredTracks from '../hooks/useFilteredTracks';
+import useInvalidate from '../hooks/useInvalidate';
+import type { LoaderData } from '../types/museeks';
 
 export default function ViewPlaylistDetails() {
   const { playlists, playlistTracks, tracksDensity } =
@@ -24,27 +25,27 @@ export default function ViewPlaylistDetails() {
   const { playlistID } = useParams();
   const trackPlayingID = usePlayingTrackID();
 
+  const invalidate = useInvalidate();
+
   const search = useLibraryStore((state) => state.search);
-  const filteredTracks = useMemo(
-    () => filterTracks(playlistTracks, search),
-    [playlistTracks, search],
-  );
+  const filteredTracks = useFilteredTracks(playlistTracks, false);
 
   const onReorder = useCallback(
-    (
+    async (
       playlistID: string,
       tracksIDs: string[],
       targetTrackID: string,
       position: 'above' | 'below',
     ) => {
-      PlaylistsAPI.reorderTracks(
+      await PlaylistsAPI.reorderTracks(
         playlistID,
         tracksIDs,
         targetTrackID,
         position,
       );
+      invalidate();
     },
-    [],
+    [invalidate],
   );
 
   if (playlistTracks.length === 0) {
@@ -89,7 +90,7 @@ export default function ViewPlaylistDetails() {
       type="playlist"
       reorderable={true}
       onReorder={onReorder}
-      tracks={playlistTracks}
+      tracks={filteredTracks}
       tracksDensity={tracksDensity}
       trackPlayingID={trackPlayingID}
       playlists={playlists}

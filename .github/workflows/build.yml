@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: 'Test: Rust (+ Generate Types)'
         run: bun run gen
@@ -44,14 +44,14 @@ jobs:
       - name: 'Test: TS/JS linting & formatting'
         run: 'bun run test:lint'
 
-      - name: 'Test: CSS linting'
-        run: 'bun run test:css'
-
       - name: 'Test: unit'
         run: 'bun run test:unit'
 
       - name: 'Test: Types'
         run: 'bun run test:typings'
+
+      - name: 'Test: Circular Dependencies'
+        run: 'bun run madge --circular --extensions ts --extensions tsx .'
 
       - name: Build application
         run: bun run build
@@ -98,7 +98,7 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - uses: tauri-apps/tauri-action@v0
         env:

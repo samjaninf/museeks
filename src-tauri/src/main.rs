@@ -4,9 +4,11 @@
 mod libs;
 mod plugins;
 
-use libs::utils::show_window;
-use log::LevelFilter;
-use tauri::Manager;
+use libs::file_associations::setup_file_associations;
+use libs::utils::get_theme_from_name;
+use log::{info, LevelFilter};
+use plugins::config::{get_storage_dir, ConfigManager};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_log::fern::colors::ColoredLevelConfig;
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_window_state::StateFlags;
@@ -24,6 +26,10 @@ async fn main() {
                 .targets([
                     Target::new(TargetKind::Stdout),
                     Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::Folder {
+                        path: get_storage_dir(),
+                        file_name: Some("museeks".into()),
+                    }),
                 ])
                 .level(LevelFilter::Info)
                 .with_colors(ColoredLevelConfig::default())
@@ -45,8 +51,9 @@ async fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_single_instance::init(|app_handle, _, _| {
+            // Focus on the already running app in case the app is opened again
             let window = app_handle.get_webview_window("main").unwrap();
-            show_window(&window);
+            window.set_focus().unwrap();
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -55,11 +62,50 @@ async fn main() {
                 )
                 .build(),
         )
-        // TODO: tauri-plugin-theme to update the native theme at runtime
-        .setup(|_app| {
-            // :]
+        .setup(|app| {
+            let config_manager = app.state::<ConfigManager>();
+            let conf = config_manager.get()?;
+
+            // We intentionally create the window ourselves to set the window theme to the right value
+            let window_builder =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("Museeks")
+                    .visible(false)
+                    .theme(get_theme_from_name(&conf.theme))
+                    .inner_size(900.0, 550.0)
+                    .min_inner_size(900.0, 550.0)
+                    .fullscreen(false)
+                    .resizable(true)
+                    .disable_drag_drop_handler() // TODO: Windows drag-n-drop on windows does not work :| https://github.com/tauri-apps/wry/issues/904
+                    .zoom_hotkeys_enabled(true);
+
+            #[cfg(target_os = "macos")]
+            window_builder
+                .hidden_title(true)
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .build()?;
+
+            #[cfg(not(target_os = "macos"))]
+            window_builder.build()?;
+
+            info!("Main window built");
+
+            // FIXME: File association for non-macOS is not working well:
+            // - Does not work with single instance when the app is already open
+            // - Issues with C:\... URLs parsing with rust-url
+            // - The main window is created, but the UI may not be ready yet to receive the event requesting a playback
+            #[cfg(not(target_os = "macos"))]
+            setup_file_associations(app);
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(
+            #[allow(unused_variables)]
+            |app_handle, event| {
+                #[cfg(target_os = "macos")]
+                setup_file_associations(app_handle, event);
+            },
+        );
 }
